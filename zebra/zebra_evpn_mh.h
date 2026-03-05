@@ -136,6 +136,22 @@ struct zebra_evpn_l2_nh {
 	uint32_t ref_cnt;
 };
 
+#define EVPN_MH_SKB_MARK_BASE  100
+#define EVPN_MH_SKB_MARK_MCAST EVPN_MH_SKB_MARK_BASE
+
+/* Local ES peers */
+struct zebra_evpn_mh_vtep {
+	struct ipaddr vtep_ip;
+
+	/* List of VTEPs (zebra_evpn_es_vtep) */
+	struct list *es_vtep_list;
+
+	/* memory used for adding the entry to zmh_info->vtep_list */
+	struct listnode listnode;
+
+	uint32_t sph_offset;
+};
+
 /* PE attached to an ES */
 struct zebra_evpn_es_vtep {
 	struct zebra_evpn_es *es; /* parent ES */
@@ -145,12 +161,20 @@ struct zebra_evpn_es_vtep {
 	/* Rxed Type-4 route from this VTEP */
 #define ZEBRA_EVPNES_VTEP_RXED_ESR (1 << 0)
 #define ZEBRA_EVPNES_VTEP_DEL_IN_PROG (1 << 1)
+	/* ES VTEP is associated with a local ES */
+#define ZEBRA_EVPNES_VTEP_LOCAL (1 << 2)
+	/* SPH filter has been setup for this ES */
+#define ZEBRA_EVPNES_VTEP_SPH_SET (1 << 3)
 
 	/* MAC nexthop info */
 	struct zebra_evpn_l2_nh *nh;
 
 	/* memory used for adding the entry to es->es_vtep_list */
 	struct listnode es_listnode;
+
+	/* memory used for adding the entry to zebra_mh_vtep->es_vtep_list */
+	struct zebra_evpn_mh_vtep *mh_vtep;
+	struct listnode vtep_listnode;
 
 	/* Parameters for DF election */
 	uint8_t df_alg;
@@ -247,6 +271,12 @@ struct zebra_evpn_mh_info {
 	struct hash *nhg_table;
 	/* L2-NH table - key: vtep_up, data: zebra_evpn_nh */
 	struct hash *nh_ip_table;
+
+	bitfield_t sph_id_bitmap;
+#define EVPN_SPH_ID_MAX (16)
+
+	/* List of ES peer VTEPs (zebra_evpn_mh_vtep) */
+	struct list *mh_vtep_list;
 
 	/* XXX - re-visit the default hold timer value */
 	int mac_hold_time;
