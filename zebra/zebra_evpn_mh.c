@@ -4306,6 +4306,9 @@ void zebra_evpn_mh_config_write(struct vty *vty)
 		vty_out(vty, "evpn mh neigh-holdtime %d\n",
 			zmh_info->neigh_hold_time);
 
+	if (zmh_info->flags & ZEBRA_EVPN_MH_NEIGH_GRAT_FLOOD_OFF)
+		vty_out(vty, "evpn mh garp-flood-off\n");
+
 	if (zmh_info->startup_delay_time != ZEBRA_EVPN_MH_STARTUP_DELAY_DEF)
 		vty_out(vty, "evpn mh startup-delay %d\n",
 			zmh_info->startup_delay_time);
@@ -4349,6 +4352,19 @@ int zebra_evpn_mh_startup_delay_update(struct vty *vty, uint32_t duration,
 	 */
 	if (zmh_info->startup_delay_timer)
 		zebra_evpn_mh_startup_delay_timer_start("config");
+
+	return 0;
+}
+
+int zebra_evpn_mh_garp_flood_off(struct vty *vty, bool flood_off)
+{
+	if (flood_off) {
+		zmh_info->flags |= ZEBRA_EVPN_MH_NEIGH_GRAT_FLOOD_OFF;
+		zebra_evpn_mh_garp_flood_set(false);
+	} else {
+		zmh_info->flags &= ~ZEBRA_EVPN_MH_NEIGH_GRAT_FLOOD_OFF;
+		zebra_evpn_mh_garp_flood_set(true);
+	}
 
 	return 0;
 }
