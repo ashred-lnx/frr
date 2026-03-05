@@ -2669,12 +2669,58 @@ static void zebra_evpn_es_df_delay_exp_cb(struct event *t)
 	}
 }
 
+static void zebra_evpn_mh_garp_flood_set_ifp(struct interface *ifp, bool on)
+{
+	struct zebra_if *zif;
+
+	zif = ifp->info;
+	if (!zif)
+		return;
+
+	if (on) {
+		if (zif->flags & ZIF_FLAG_EVPN_MH_GARP_FLOOD_CFG_ON)
+			return;
+		zif->flags |= ZIF_FLAG_EVPN_MH_GARP_FLOOD_CFG_ON;
+	} else {
+		if (!(zif->flags & ZIF_FLAG_EVPN_MH_GARP_FLOOD_CFG_ON))
+			return;
+		zif->flags &= ~ZIF_FLAG_EVPN_MH_GARP_FLOOD_CFG_ON;
+	}
+
+	if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
+		zlog_debug("ifp %s garp flood %s", ifp->name, on ? "on" : "off");
+	zebra_if_set_neigh_grat_flood(ifp, on);
+}
+
+static void zebra_evpn_mh_garp_flood_set(bool on)
+{
+	struct zebra_vrf *zvrf;
+	struct interface *ifp;
+
+	if (on && !zebra_evpn_mh_do_garp_flood())
+		return;
+
+	zlog_debug("EVPN MH GARP flood enable");
+	zvrf = zebra_vrf_get_evpn();
+	FOR_ALL_INTERFACES (zvrf->vrf, ifp) {
+		if ((ifp->ifindex == IFINDEX_INTERNAL) || !IS_ZEBRA_IF_BRIDGE(ifp))
+			continue;
+		zebra_evpn_mh_garp_flood_set_ifp(ifp, on);
+	}
+}
+
 /* currently there is no global config to turn on MH instead we use
  * the addition of the first local Ethernet Segment as the trigger to
  * init MH specific processing
  */
 static void zebra_evpn_mh_on_first_local_es(void)
 {
+	if (zmh_info->flags & ZEBRA_EVPN_MH_ENABLE)
+		return;
+
+	zmh_info->flags |= ZEBRA_EVPN_MH_ENABLE;
+	zlog_debug("EVPN MH enabled");
+
 	zebra_evpn_mh_dup_addr_detect_off();
 	zebra_evpn_mh_advertise_reach_neigh_only();
 	zebra_evpn_mh_advertise_svi_mac();

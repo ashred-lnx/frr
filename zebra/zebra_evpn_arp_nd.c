@@ -208,8 +208,8 @@ static struct in_addr zebra_evpn_arp_nd_get_vtep(struct zebra_evpn_es *es,
 	if (listhead(es->es_vtep_list))
 		es_vtep = listgetdata(listhead(es->es_vtep_list));
 
-	if (es_vtep)
-		nh = es_vtep->vtep_ip;
+	if (es_vtep && IS_IPADDR_V4(&es_vtep->vtep_ip))
+		nh = es_vtep->vtep_ip.ipaddr_v4;
 	else
 		nh.s_addr = 0;
 
