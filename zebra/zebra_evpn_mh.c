@@ -8,6 +8,10 @@
 
 #include <zebra.h>
 
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
 #include "command.h"
 #include "hash.h"
 #include "if.h"
@@ -41,6 +45,7 @@
 #include "zebra/zebra_evpn_mh.h"
 #include "zebra/zebra_evpn_arp_nd.h"
 #include "zebra/zebra_nhg.h"
+#include "zebra/zebra_trace.h"
 
 DEFINE_MTYPE_STATIC(ZEBRA, ZACC_BD, "Access Broadcast Domain");
 DEFINE_MTYPE_STATIC(ZEBRA, ZES, "Ethernet Segment");
@@ -61,8 +66,79 @@ static void zebra_evpn_mh_update_protodown_es(struct zebra_evpn_es *es,
 					      bool resync_dplane);
 static void zebra_evpn_mh_clear_protodown_es(struct zebra_evpn_es *es);
 static void zebra_evpn_mh_startup_delay_timer_start(const char *rc);
+static void zebra_evpn_mh_garp_flood_set_ifp(struct interface *ifp, bool on);
+static void zebra_evpn_mh_garp_flood_set(bool on);
 
 esi_t zero_esi_buf, *zero_esi = &zero_esi_buf;
+
+#define TC_SUDO_STR ""
+#define TC_BIN_STR  "/usr/sbin/tc"
+
+extern struct zebra_privs_t zserv_privs;
+
+static int zebra_program_using_fork_exec(char *cmd, int debug)
+{
+#define PCONDCHECK(x)                                                          \
+	if (!(x)) {                                                            \
+		perror(#x " failed"); /* abort(); */                           \
+	}
+	pid_t pid;
+	int exitstat, rc;
+	sigset_t sigs, prevsigs;
+
+	sigemptyset(&sigs);
+	sigaddset(&sigs, SIGINT);
+	PCONDCHECK(sigprocmask(SIG_BLOCK, &sigs, &prevsigs) == 0);
+
+	if (debug)
+		zlog_debug("%s cmd %s is forked ", __func__, cmd);
+
+	pid = fork();
+	if (pid < 0) {
+		zlog_warn("%s Can't fork: %s", __func__, safe_strerror(errno));
+		return -1;
+	} else if (pid == 0) {
+		if (setpgid(0, 0) < 0)
+			zlog_warn("%s FAILED setpgid for child: %s cmd %s",
+				  __func__, safe_strerror(errno), cmd);
+		rc = execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+		if (debug)
+			zlog_debug("%s tc rule rc %u errno %s for cmd %s",
+				   __func__, rc, safe_strerror(errno), cmd);
+		exit(0);
+	}
+
+	if (setpgid(pid, pid) < 0 && errno != EACCES)
+		zlog_warn("%s FAILED child pid %u decouple process group cmd %s",
+			  __func__, pid, cmd);
+
+	PCONDCHECK(sigprocmask(SIG_SETMASK, &prevsigs, NULL) == 0);
+
+	if (waitpid(pid, &exitstat, 0) == -1) {
+		zlog_warn("%s FAILED waitpid for pid %u: %s cmd %s",
+			  __func__, pid, safe_strerror(errno), cmd);
+		return -1;
+	}
+	return 0;
+}
+
+static void zebra_evpn_mh_tc_program(char *cmd)
+{
+	int rc = 0;
+
+	if (zmh_info->flags & ZEBRA_EVPN_MH_TC_OFF) {
+		if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
+			zlog_debug("%s:%s", "skip", cmd);
+		return;
+	}
+
+	frr_with_privs (&zserv_privs) {
+		rc = zebra_program_using_fork_exec(cmd,
+						   IS_ZEBRA_DEBUG_EVPN_MH_ES);
+	}
+	if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
+		zlog_debug("%s rc %d cmd %s", __func__, rc, cmd);
+}
 
 /*****************************************************************************/
 /* Ethernet Segment to EVI association -
@@ -2681,6 +2757,8 @@ static void zebra_evpn_es_local_info_clear(struct zebra_evpn_es **esp)
 {
 	struct zebra_if *zif;
 	struct zebra_evpn_es *es = *esp;
+	struct zebra_evpn_es_vtep *zvtep;
+	struct listnode *node;
 	bool dplane_updated = false;
 
 	if (!(es->flags & ZEBRA_EVPNES_LOCAL))

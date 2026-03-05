@@ -19,6 +19,8 @@
 #include "zebra_nhg.h"
 #include "zebra_nb.h"
 
+#define TC_CMD_STR_LEN 512
+
 /* Ethernet Segment entry -
  * - Local and remote ESs are maintained in a global RB tree,
  * zmh_info->es_rb_tree using ESI as key
