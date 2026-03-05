@@ -256,44 +256,15 @@ bool pim_addr_is_multicast(pim_addr addr)
 #endif
 	return false;
 }
-bool pim_is_rp_allowed(struct pim_interface *pim_ifp, pim_addr *rp)
-{
-	struct prefix rp_pfx;
-	struct prefix_list *pl;
-
-	/* No reason to call this if you're conforming to the RFC */
-	assert(pim_ifp->allow_rp);
-
-	if (!pim_ifp->allow_rp_plist)
-		return true;
-
-#if PIM_IPV == 4
-	rp_pfx.family = AF_INET;
-	rp_pfx.prefixlen = 32;
-	rp_pfx.u.prefix4 = *rp;
-#else
-	rp_pfx.family = AF_INET6;
-	rp_pfx.prefixlen = 128;
-	rp_pfx.u.prefix6 = *rp;
-#endif
-
-	pl = prefix_list_lookup(AFI_IP, pim_ifp->allow_rp_plist);
-	return pl ? prefix_list_apply(pl, &rp_pfx) == PREFIX_PERMIT : false;
-}
-/*ip address with -1, or 0 */
+/* Reject clearly invalid MSDP peer IPs. */
 bool pim_is_valid_ipddress(const struct ipaddr *ip)
 {
-	if (ip->ipa_type == IPADDR_V4) {
-		return (ip->ip._v4_addr.s_addr == 0 ||
-			ip->ip._v4_addr.s_addr == 0xFFFFFFFF);
-	} else if (ip->ipa_type == IPADDR_V6) {
-		/*
-		 * In this case,check the IPv6 address if needed,
-		 * assuming its valid all the time
-		 */
+	if (ip->ipa_type == IPADDR_V4)
+		return (ip->ip._v4_addr.s_addr != 0 &&
+			ip->ip._v4_addr.s_addr != 0xFFFFFFFF);
+
+	if (ip->ipa_type == IPADDR_V6)
 		return false;
-	} else {
-		/* Invalid IP address type */
-		return true;
-	}
+
+	return false;
 }
