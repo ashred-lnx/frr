@@ -606,6 +606,18 @@ void zebra_evpn_arp_nd_if_update(struct zebra_if *zif, bool enable)
 		return;
 
 	old_snoop = !!(zif->flags & ZIF_FLAG_ARP_ND_SNOOP);
+	/*
+	 * Recovery path: if snoop is marked enabled but socket fd is gone,
+	 * force re-enable to recreate the socket and read event.
+	 */
+	if (enable && old_snoop && zif->arp_nd_info.pkt_fd < 0) {
+		if (IS_ZEBRA_DEBUG_EVPN_MH_ARP_ND_EVT)
+			zlog_debug("recover arp_nd snoop on %s: stale enabled state with invalid fd",
+				   zif->ifp->name);
+		zif->flags &= ~ZIF_FLAG_ARP_ND_SNOOP;
+		old_snoop = false;
+	}
+
 	if (old_snoop == enable)
 		return;
 
