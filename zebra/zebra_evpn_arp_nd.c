@@ -422,11 +422,16 @@ static int zebra_evpn_arp_nd_recvmsg(int fd, uint8_t *buf, size_t len, uint16_t 
 	/* The BPF should only result in incoming packets; if an outgoing
 	 * packet is handed to us ignore it
 	 */
-	if (from.sll_pkttype == PACKET_OUTGOING)
+	if (from.sll_pkttype == PACKET_OUTGOING) {
+		*errno_ret = EINTR;
 		return -1;
+	}
 
-	if (!zebra_evpn_arp_nd_pkt_interesting(buf, packetlen))
+	/* Skip non-target traffic and keep draining the socket. */
+	if (!zebra_evpn_arp_nd_pkt_interesting(buf, packetlen)) {
+		*errno_ret = EINTR;
 		return -1;
+	}
 
 	for (cmsg = CMSG_FIRSTHDR(&msgh); cmsg != NULL;
 	     cmsg = CMSG_NXTHDR(&msgh, cmsg)) {
