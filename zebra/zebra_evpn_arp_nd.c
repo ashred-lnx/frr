@@ -120,7 +120,7 @@ void zebra_evpn_arp_nd_print_summary(struct vty *vty, bool uj)
 
 void zebra_evpn_arp_nd_if_print(struct vty *vty, struct zebra_if *zif)
 {
-	if (zif->arp_nd_info.pkt_fd > 0)
+	if (zif->arp_nd_info.pkt_fd >= 0)
 		vty_out(vty, "  ARP-ND redirect enabled: ARP %u ND %u\n",
 			zif->arp_nd_info.arp_pkts, zif->arp_nd_info.na_pkts);
 }
@@ -457,6 +457,9 @@ static int zebra_evpn_arp_nd_recvmsg(int fd, uint8_t *buf, size_t len, uint16_t 
 static void zebra_evpn_arp_nd_read(struct event *thread);
 static void zebra_evpn_arp_nd_pkt_read_enable(struct zebra_if *zif)
 {
+	if (zif->arp_nd_info.pkt_fd < 0)
+		return;
+
 	event_add_read(zrouter.master, zebra_evpn_arp_nd_read, zif,
 		       zif->arp_nd_info.pkt_fd, &zif->arp_nd_info.t_pkt_read);
 }
@@ -615,12 +618,16 @@ void zebra_evpn_arp_nd_if_update(struct zebra_if *zif, bool enable)
 		zif->flags |= ZIF_FLAG_ARP_ND_SNOOP;
 		/* create a snooper socket for the bridge-port */
 		zif->arp_nd_info.pkt_fd = zebra_evpn_arp_nd_sock_create(zif);
+		if (zif->arp_nd_info.pkt_fd < 0) {
+			zif->flags &= ~ZIF_FLAG_ARP_ND_SNOOP;
+			return;
+		}
 		/* create a thread to read and process the packets */
 		zebra_evpn_arp_nd_pkt_read_enable(zif);
 	} else {
 		zif->flags &= ~ZIF_FLAG_ARP_ND_SNOOP;
 		event_cancel(&zif->arp_nd_info.t_pkt_read);
-		if (zif->arp_nd_info.pkt_fd > 0) {
+		if (zif->arp_nd_info.pkt_fd >= 0) {
 			close(zif->arp_nd_info.pkt_fd);
 			zif->arp_nd_info.pkt_fd = -1;
 		}

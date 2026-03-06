@@ -139,6 +139,7 @@ static int if_zebra_new_hook(struct interface *ifp)
 	zebra_if->multicast = IF_ZEBRA_DATA_UNSPEC;
 	zebra_if->mpls_config = IF_ZEBRA_DATA_UNSPEC;
 	zebra_if->shutdown = IF_ZEBRA_DATA_UNSPEC;
+	zebra_if->arp_nd_info.pkt_fd = -1;
 
 	zebra_if->link_nsid = NS_UNKNOWN;
 
