@@ -399,6 +399,7 @@ zebra_evpn_es_evi_find(struct zebra_evpn_es *es, struct zebra_evpn *zevpn);
 extern int zebra_evpn_vl_vxl_bridge_lookup(uint16_t vid,
 					   struct zebra_if *vxlan_zif);
 extern void zebra_evpn_mh_vtep_show(struct vty *vty, bool uj);
+extern int zebra_evpn_mh_tc_off(struct vty *vty, bool tc_off);
 extern int zebra_evpn_mh_garp_flood_off(struct vty *vty, bool flood_off);
 void zebra_build_type3_esi(uint32_t lid, struct ethaddr *mac, esi_t *esi);
 

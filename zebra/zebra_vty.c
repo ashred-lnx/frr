@@ -2816,7 +2816,6 @@ DEFPY(evpn_mh_garp_flood_off, evpn_mh_garp_flood_off_cmd, "[no$no] evpn mh garp-
 
 	return zebra_evpn_mh_garp_flood_off(vty, flood_off);
 }
-
 DEFPY(evpn_mh_redirect_off, evpn_mh_redirect_off_cmd,
       "[no$no] evpn mh redirect-off",
       NO_STR

@@ -120,7 +120,7 @@ void zebra_evpn_arp_nd_print_summary(struct vty *vty, bool uj)
 
 void zebra_evpn_arp_nd_if_print(struct vty *vty, struct zebra_if *zif)
 {
-	if (zif->arp_nd_info.pkt_fd > 0)
+	if (zif->arp_nd_info.pkt_fd >= 0)
 		vty_out(vty, "  ARP-ND redirect enabled: ARP %u ND %u\n",
 			zif->arp_nd_info.arp_pkts, zif->arp_nd_info.na_pkts);
 }
@@ -333,6 +333,56 @@ static int zebra_evpn_arp_nd_recvmsg(int fd, uint8_t *buf, size_t len, uint16_t 
 	return -1;
 }
 #else
+/* Check if the packet is a unicast ARP or IPv6 NS/NA packet. */
+static bool zebra_evpn_arp_nd_pkt_interesting(const uint8_t *buf, int len)
+{
+	uint16_t ethertype;
+	int l3off = 14;
+	uint8_t nh;
+	uint8_t icmp6_type;
+
+	if (len < 14)
+		return false;
+
+	/* Only process unicast packets. */
+	if (buf[0] & 0x1)
+		return false;
+
+	ethertype = ((uint16_t)buf[12] << 8) | buf[13];
+	if (ethertype == ETH_P_8021Q || ethertype == ETH_P_8021AD) {
+		if (len < 18)
+			return false;
+		ethertype = ((uint16_t)buf[16] << 8) | buf[17];
+		l3off = 18;
+	}
+
+	if (ethertype == ETH_P_ARP)
+		return true;
+
+	if (ethertype != ETH_P_IPV6)
+		return false;
+
+	/* IPv6 next-header byte is at +6 from start of IPv6 header. */
+	if (len < l3off + 41)
+		return false;
+
+	nh = buf[l3off + 6];
+	if (nh == IPPROTO_ICMPV6) {
+		icmp6_type = buf[l3off + 40];
+	} else if (nh == IPPROTO_HOPOPTS) {
+		/* Minimal Hop-by-Hop extension header is 8 bytes. */
+		if (len < l3off + 49)
+			return false;
+		if (buf[l3off + 40] != IPPROTO_ICMPV6)
+			return false;
+		icmp6_type = buf[l3off + 48];
+	} else {
+		return false;
+	}
+
+	return (icmp6_type == 135 || icmp6_type == 136);
+}
+
 /* Read ctrl and data for a single packet on the ARP-ND socket */
 static int zebra_evpn_arp_nd_recvmsg(int fd, uint8_t *buf, size_t len, uint16_t *vlan_p,
 				     int *packetlen_p, int *errno_ret)
@@ -372,8 +422,16 @@ static int zebra_evpn_arp_nd_recvmsg(int fd, uint8_t *buf, size_t len, uint16_t 
 	/* The BPF should only result in incoming packets; if an outgoing
 	 * packet is handed to us ignore it
 	 */
-	if (from.sll_pkttype == PACKET_OUTGOING)
+	if (from.sll_pkttype == PACKET_OUTGOING) {
+		*errno_ret = EINTR;
 		return -1;
+	}
+
+	/* Skip non-target traffic and keep draining the socket. */
+	if (!zebra_evpn_arp_nd_pkt_interesting(buf, packetlen)) {
+		*errno_ret = EINTR;
+		return -1;
+	}
 
 	for (cmsg = CMSG_FIRSTHDR(&msgh); cmsg != NULL;
 	     cmsg = CMSG_NXTHDR(&msgh, cmsg)) {
@@ -399,6 +457,9 @@ static int zebra_evpn_arp_nd_recvmsg(int fd, uint8_t *buf, size_t len, uint16_t 
 static void zebra_evpn_arp_nd_read(struct event *thread);
 static void zebra_evpn_arp_nd_pkt_read_enable(struct zebra_if *zif)
 {
+	if (zif->arp_nd_info.pkt_fd < 0)
+		return;
+
 	event_add_read(zrouter.master, zebra_evpn_arp_nd_read, zif,
 		       zif->arp_nd_info.pkt_fd, &zif->arp_nd_info.t_pkt_read);
 }
@@ -447,22 +508,6 @@ static int zebra_evpn_arp_nd_sock_create(struct zebra_if *zif)
 }
 #else
 
-/* BPF filter for snooping on unicast ARP req/replies and unicast IPv6 NS/NA -
- * tcpdump -dd '((ether[0] &1 == 0) and (arp or
- *               (icmp6 and (ip6[40] == 135 or ip6[40] == 136)))) and inbound'
- */
-static struct sock_filter arp_nd_filter[] = {
-	{0x30, 0, 0, 0x00000000},  {0x45, 14, 0, 0x00000001},
-	{0x28, 0, 0, 0x0000000c},  {0x15, 9, 0, 0x00000806},
-	{0x15, 0, 11, 0x000086dd}, {0x30, 0, 0, 0x00000014},
-	{0x15, 3, 0, 0x0000003a},  {0x15, 0, 8, 0x0000002c},
-	{0x30, 0, 0, 0x00000036},  {0x15, 0, 6, 0x0000003a},
-	{0x30, 0, 0, 0x00000036},  {0x15, 1, 0, 0x00000087},
-	{0x15, 0, 3, 0x00000088},  {0x28, 0, 0, 0xfffff004},
-	{0x15, 1, 0, 0x00000004},  {0x6, 0, 0, 0x00040000},
-	{0x6, 0, 0, 0x00000000},
-};
-
 /* Setup socket per-access bridge port */
 static int zebra_evpn_arp_nd_sock_create(struct zebra_if *zif)
 {
@@ -470,10 +515,6 @@ static int zebra_evpn_arp_nd_sock_create(struct zebra_if *zif)
 	int reuse = 1;
 	int rcvbuf = ZEBRA_EVPN_ARP_ND_SOC_RCVBUF;
 	long flags;
-	struct sock_fprog prog = {
-		.len = sizeof(arp_nd_filter) / sizeof(arp_nd_filter[0]),
-		.filter = arp_nd_filter,
-	};
 
 	frr_with_privs (&zserv_privs) {
 		fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
@@ -506,15 +547,6 @@ static int zebra_evpn_arp_nd_sock_create(struct zebra_if *zif)
 	 */
 	if (setsockopt(fd, SOL_PACKET, PACKET_AUXDATA, (void *)&reuse,
 		       sizeof(reuse))) {
-		flog_err(EC_LIB_SOCKET,
-			 "evpn arp_nd sock PACKET_AUXDATA set: fd %d errno %s",
-			 fd, safe_strerror(errno));
-		close(fd);
-		return -1;
-	}
-
-	if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &prog, sizeof(prog)) <
-	    0) {
 		flog_err(EC_LIB_SOCKET,
 			 "evpn arp_nd sock PACKET_AUXDATA set: fd %d errno %s",
 			 fd, safe_strerror(errno));
@@ -574,6 +606,18 @@ void zebra_evpn_arp_nd_if_update(struct zebra_if *zif, bool enable)
 		return;
 
 	old_snoop = !!(zif->flags & ZIF_FLAG_ARP_ND_SNOOP);
+	/*
+	 * Recovery path: if snoop is marked enabled but socket fd is gone,
+	 * force re-enable to recreate the socket and read event.
+	 */
+	if (enable && old_snoop && zif->arp_nd_info.pkt_fd < 0) {
+		if (IS_ZEBRA_DEBUG_EVPN_MH_ARP_ND_EVT)
+			zlog_debug("recover arp_nd snoop on %s: stale enabled state with invalid fd",
+				   zif->ifp->name);
+		zif->flags &= ~ZIF_FLAG_ARP_ND_SNOOP;
+		old_snoop = false;
+	}
+
 	if (old_snoop == enable)
 		return;
 
@@ -586,12 +630,16 @@ void zebra_evpn_arp_nd_if_update(struct zebra_if *zif, bool enable)
 		zif->flags |= ZIF_FLAG_ARP_ND_SNOOP;
 		/* create a snooper socket for the bridge-port */
 		zif->arp_nd_info.pkt_fd = zebra_evpn_arp_nd_sock_create(zif);
+		if (zif->arp_nd_info.pkt_fd < 0) {
+			zif->flags &= ~ZIF_FLAG_ARP_ND_SNOOP;
+			return;
+		}
 		/* create a thread to read and process the packets */
 		zebra_evpn_arp_nd_pkt_read_enable(zif);
 	} else {
 		zif->flags &= ~ZIF_FLAG_ARP_ND_SNOOP;
-		EVENT_OFF(zif->arp_nd_info.t_pkt_read);
-		if (zif->arp_nd_info.pkt_fd > 0) {
+		event_cancel(&zif->arp_nd_info.t_pkt_read);
+		if (zif->arp_nd_info.pkt_fd >= 0) {
 			close(zif->arp_nd_info.pkt_fd);
 			zif->arp_nd_info.pkt_fd = -1;
 		}
