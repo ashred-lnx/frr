@@ -5157,6 +5157,7 @@ static void rib_process_dplane_results(struct event *event)
 				break;
 
 			case DPLANE_OP_FDB_READ:
+			case DPLANE_OP_NEIGH_READ:
 				break;
 			} /* Dispatch by op code */
 
