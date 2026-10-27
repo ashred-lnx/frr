@@ -65,6 +65,9 @@ const uint32_t DPLANE_DEFAULT_MAX_QUEUED = 200;
 /* Default value for new work per cycle */
 const uint32_t DPLANE_DEFAULT_NEW_WORK = 100;
 
+/* Default value for kernel reads per dataplane read event */
+const uint32_t DPLANE_DEFAULT_READ_PACKETS = 100;
+
 /* Validation check macro for context blocks */
 /* #define DPLANE_DEBUG 1 */
 
@@ -697,6 +700,9 @@ static struct zebra_dplane_globals {
 	 * incoming burst.
 	 */
 	uint32_t dg_updates_per_cycle;
+
+	/* Limit number of kernel reads per dataplane read event */
+	_Atomic uint32_t dg_read_packets;
 
 	_Atomic uint32_t dg_routes_in;
 	_Atomic uint32_t dg_routes_queued;
@@ -4086,6 +4092,26 @@ void dplane_set_in_queue_limit(uint32_t limit, bool set)
 }
 
 /*
+ * Retrieve the number of kernel reads per dataplane read event.
+ */
+uint32_t dplane_get_read_packets(void)
+{
+	return atomic_load_explicit(&zdplane_info.dg_read_packets, memory_order_relaxed);
+}
+
+/*
+ * Configure the number of kernel reads per dataplane read event.
+ */
+void dplane_set_read_packets(uint32_t packets, bool set)
+{
+	/* Reset to default on 'unset' */
+	if (!set)
+		packets = DPLANE_DEFAULT_READ_PACKETS;
+
+	atomic_store_explicit(&zdplane_info.dg_read_packets, packets, memory_order_relaxed);
+}
+
+/*
  * Retrieve the current queue depth of incoming, unprocessed updates
  */
 uint32_t dplane_get_in_queue_len(void)
@@ -7257,6 +7283,7 @@ int dplane_show_helper(struct vty *vty, bool detailed)
 	vty_out(vty, "Route update queue max:   %"PRIu64"\n", queue_max);
 	vty_out(vty, "Route updates skipped:    %" PRIu64 "\n", kernels_skipped);
 	vty_out(vty, "Dplane update yields:     %"PRIu64"\n", yields);
+	vty_out(vty, "Dplane reads per event:   %u\n", dplane_get_read_packets());
 
 	incoming = atomic_load_explicit(&zdplane_info.dg_lsps_in,
 					memory_order_relaxed);
@@ -9075,6 +9102,8 @@ static void zebra_dplane_init_internal(void)
 	zdplane_info.dg_updates_per_cycle = DPLANE_DEFAULT_NEW_WORK;
 
 	zdplane_info.dg_max_queued_updates = DPLANE_DEFAULT_MAX_QUEUED;
+
+	zdplane_info.dg_read_packets = DPLANE_DEFAULT_READ_PACKETS;
 
 	/* Register default kernel 'provider' during init */
 	dplane_provider_init();

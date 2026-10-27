@@ -3177,6 +3177,15 @@ module frr-zebra {
       description
         "Limit on the number of updates queued to the dataplane subsystem.";
     }
+    leaf dplane-packets {
+      type uint32 {
+        range "1..10000";
+      }
+      default "100";
+      description
+        "Number of kernel receive operations the dataplane thread performs
+         before relinquishing the dataplane thread.";
+    }
     container nexthop-group {
       description
         "Global nexthop group configuration.";

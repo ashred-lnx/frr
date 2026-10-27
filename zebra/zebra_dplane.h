@@ -1322,6 +1322,14 @@ uint32_t dplane_get_in_queue_limit(void);
  */
 void dplane_set_in_queue_limit(uint32_t limit, bool set);
 
+/* Retrieve the number of kernel reads per dataplane read event. */
+uint32_t dplane_get_read_packets(void);
+
+/* Configure the number of kernel reads per dataplane read event. If 'unset',
+ * reset to default value.
+ */
+void dplane_set_read_packets(uint32_t packets, bool set);
+
 /* Retrieve the current queue depth of incoming, unprocessed updates */
 uint32_t dplane_get_in_queue_len(void);
 

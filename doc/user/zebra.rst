@@ -1532,6 +1532,14 @@ order to off-load work from the main zebra pthread.
    waiting to be processed by the dataplane pthread.
 
 
+.. clicmd:: zebra dplane packets [NUMBER]
+
+   Configure the number of kernel receive operations the dataplane pthread
+   performs before returning to its event loop. Raising this drains a busy
+   netlink socket faster, at the cost of making other events on that pthread
+   wait longer behind a single read. The default is 100.
+
+
 DPDK dataplane
 ==============
 

@@ -108,6 +108,12 @@ const struct frr_yang_module_info frr_zebra_info = {
 			}
 		},
 		{
+			.xpath = "/frr-zebra:zebra/dplane-packets",
+			.cbs = {
+				.modify = zebra_dplane_packets_modify,
+			}
+		},
+		{
 			.xpath = "/frr-zebra:zebra/nexthop-group/resilience",
 			.cbs = {
 				.create = zebra_nexthop_group_resilience_create,

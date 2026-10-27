@@ -273,6 +273,21 @@ int zebra_dplane_queue_limit_modify(struct nb_cb_modify_args *args)
 }
 
 /*
+ * XPath: /frr-zebra:zebra/dplane-packets
+ */
+int zebra_dplane_packets_modify(struct nb_cb_modify_args *args)
+{
+	uint32_t packets = yang_dnode_get_uint32(args->dnode, NULL);
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	dplane_set_read_packets(packets, true);
+
+	return NB_OK;
+}
+
+/*
  * XPath: /frr-zebra:zebra/nexthop-group/resilience
  */
 int zebra_nexthop_group_resilience_create(struct nb_cb_create_args *args)

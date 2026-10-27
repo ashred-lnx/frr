@@ -455,8 +455,9 @@ static int dplane_netlink_information_fetch(struct nlmsghdr *h, ns_id_t ns_id, i
 int kernel_dplane_read(struct zebra_dplane_info *info)
 {
 	struct nlsock *nl = kernel_netlink_nlsock_lookup(info->sock);
+	uint32_t packets = dplane_get_read_packets();
 
-	netlink_parse_info(dplane_netlink_information_fetch, nl, info, 5, false, NULL, NULL);
+	netlink_parse_info(dplane_netlink_information_fetch, nl, info, packets, false, NULL, NULL);
 
 	return 0;
 }
