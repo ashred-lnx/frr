@@ -68,6 +68,7 @@ def cleanup_config(r1):
     r1.cmd_nostatus("vtysh -c 'conf t' -c 'no zebra work-queue'")
     r1.cmd_nostatus("vtysh -c 'conf t' -c 'no zebra zapi-packets'")
     r1.cmd_nostatus("vtysh -c 'conf t' -c 'no zebra dplane limit'")
+    r1.cmd_nostatus("vtysh -c 'conf t' -c 'no zebra dplane packets'")
     expect_show_running(
         r1,
         absent=[
@@ -80,6 +81,7 @@ def cleanup_config(r1):
             "zebra work-queue",
             "zebra zapi-packets",
             "zebra dplane limit",
+            "zebra dplane packets",
         ],
     )
 
@@ -137,7 +139,8 @@ def test_zebra_mgmt_frontend_smoke(r1):
     step("Configure mgmt-fronted zebra smoke commands")
     r1.cmd_nostatus(
         "vtysh -c 'conf t' -c 'zebra work-queue 123' "
-        "-c 'zebra zapi-packets 456' -c 'zebra dplane limit 789'"
+        "-c 'zebra zapi-packets 456' -c 'zebra dplane limit 789' "
+        "-c 'zebra dplane packets 321'"
     )
 
     expect_show_running(
@@ -146,13 +149,15 @@ def test_zebra_mgmt_frontend_smoke(r1):
             "zebra work-queue 123",
             "zebra zapi-packets 456",
             "zebra dplane limit 789",
+            "zebra dplane packets 321",
         ],
     )
 
     step("Remove mgmt-fronted zebra smoke commands")
     r1.cmd_nostatus(
         "vtysh -c 'conf t' -c 'no zebra work-queue' "
-        "-c 'no zebra zapi-packets' -c 'no zebra dplane limit'"
+        "-c 'no zebra zapi-packets' -c 'no zebra dplane limit' "
+        "-c 'no zebra dplane packets'"
     )
 
     expect_show_running(
@@ -161,5 +166,34 @@ def test_zebra_mgmt_frontend_smoke(r1):
             "zebra work-queue",
             "zebra zapi-packets",
             "zebra dplane limit",
+            "zebra dplane packets",
         ],
     )
+
+
+def check_dplane_reads(r1, expected):
+    output = r1.cmd_nostatus("vtysh -c 'show zebra dplane'")
+
+    if f"Dplane reads per event:   {expected}" not in output:
+        return f"Missing read count '{expected}' in show zebra dplane:\n{output}"
+
+    return None
+
+
+def expect_dplane_reads(r1, expected):
+    test_func = lambda: check_dplane_reads(r1, expected)
+    _, result = topotest.run_and_expect(test_func, None, count=20, wait=1)
+    assert result is None, result
+
+
+def test_zebra_dplane_packets_runtime(r1):
+    step("Default read count is reported by 'show zebra dplane'")
+    expect_dplane_reads(r1, 100)
+
+    step("Configured read count reaches the dataplane thread")
+    r1.cmd_nostatus("vtysh -c 'conf t' -c 'zebra dplane packets 321'")
+    expect_dplane_reads(r1, 321)
+
+    step("Unsetting restores the default")
+    r1.cmd_nostatus("vtysh -c 'conf t' -c 'no zebra dplane packets'")
+    expect_dplane_reads(r1, 100)
